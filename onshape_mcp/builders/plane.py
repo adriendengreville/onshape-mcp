@@ -96,13 +96,13 @@ class PlaneBuilder:
         self.parameters = [
             {
                 "btType": "BTMParameterEnum-145",
-                "parameterId": "cPlaneType",
+                "parameterId": "cplaneType",
                 "value": "OFFSET",
                 "enumName": "CPlaneType",
             },
             {
                 "btType": "BTMParameterQueryList-148",
-                "parameterId": "plane",
+                "parameterId": "entities",
                 "queries": [_make_plane_query(base_plane_id)],
             },
             {
@@ -145,13 +145,13 @@ class PlaneBuilder:
         self.parameters = [
             {
                 "btType": "BTMParameterEnum-145",
-                "parameterId": "cPlaneType",
+                "parameterId": "cplaneType",
                 "value": "LINE_ANGLE",
                 "enumName": "CPlaneType",
             },
             {
                 "btType": "BTMParameterQueryList-148",
-                "parameterId": "line",
+                "parameterId": "entities",
                 "queries": [line_query],
             },
             {
@@ -191,7 +191,7 @@ class PlaneBuilder:
         self.parameters = [
             {
                 "btType": "BTMParameterEnum-145",
-                "parameterId": "cPlaneType",
+                "parameterId": "cplaneType",
                 "value": "THREE_POINT",
                 "enumName": "CPlaneType",
             },
@@ -233,7 +233,7 @@ class PlaneBuilder:
         self.parameters = [
             {
                 "btType": "BTMParameterEnum-145",
-                "parameterId": "cPlaneType",
+                "parameterId": "cplaneType",
                 "value": "MID_PLANE",
                 "enumName": "CPlaneType",
             },
@@ -267,6 +267,7 @@ class PlaneBuilder:
             )
 
         return {
+            "btType": "BTFeatureDefinitionCall-1406",
             "feature": {
                 "btType": "BTMFeature-134",
                 "featureType": "cPlane",
