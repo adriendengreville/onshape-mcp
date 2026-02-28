@@ -22,6 +22,39 @@ STANDARD_PLANE_IDS = {
     "Right": "JEC",
 }
 
+# Standard plane feature names (used for queryString format)
+STANDARD_PLANE_NAMES = {"JCC": "Front", "JDC": "Top", "JEC": "Right"}
+
+
+def _make_plane_query(plane_ref: str) -> Dict[str, Any]:
+    """Create the query object for referencing a plane.
+
+    Uses queryString format (FeatureScript query) which is more reliable
+    than deterministicIds for the cPlane feature.
+
+    Args:
+        plane_ref: Either a deterministic ID (JCC, JDC, JEC) for standard planes,
+                  a standard plane name (Front, Top, Right),
+                  or a construction plane feature ID.
+
+    Returns:
+        BTMIndividualQuery-138 dict with queryString.
+    """
+    # Resolve deterministic IDs to feature names
+    feature_name = STANDARD_PLANE_NAMES.get(plane_ref)
+    if feature_name is None:
+        # Check if it's a standard plane name directly
+        if plane_ref in STANDARD_PLANE_IDS:
+            feature_name = plane_ref
+        else:
+            # It's a custom construction plane feature ID
+            feature_name = plane_ref
+
+    return {
+        "btType": "BTMIndividualQuery-138",
+        "queryString": f'query=qCreatedBy(makeId("{feature_name}"), EntityType.FACE);',
+    }
+
 
 class PlaneBuilder:
     """Builder for creating Onshape construction plane (cPlane) features.
@@ -49,8 +82,8 @@ class PlaneBuilder:
         """Create a plane offset from a standard or existing plane.
 
         Args:
-            base_plane_id: Deterministic ID of the base plane
-                          (e.g., "JCC" for Front, "JDC" for Top, "JEC" for Right,
+            base_plane_id: Deterministic ID or feature name of the base plane
+                          (e.g., "JCC"/"Front", "JDC"/"Top", "JEC"/"Right",
                            or a construction plane feature ID).
             offset_distance: Offset distance in inches.
             flip: Whether to offset in the opposite direction.
@@ -70,12 +103,7 @@ class PlaneBuilder:
             {
                 "btType": "BTMParameterQueryList-148",
                 "parameterId": "plane",
-                "queries": [
-                    {
-                        "btType": "BTMIndividualQuery-138",
-                        "deterministicIds": [base_plane_id],
-                    }
-                ],
+                "queries": [_make_plane_query(base_plane_id)],
             },
             {
                 "btType": "BTMParameterQuantity-147",
@@ -94,19 +122,25 @@ class PlaneBuilder:
 
     def line_angle(
         self,
-        line_deterministic_id: str,
+        line_ref: str,
         angle_degrees: float,
     ) -> "PlaneBuilder":
         """Create a plane through a line at a given angle.
 
         Args:
-            line_deterministic_id: Deterministic ID of the edge/line.
+            line_ref: Reference to the edge/line (feature ID or deterministic ID).
             angle_degrees: Rotation angle in degrees.
 
         Returns:
             Self for chaining.
         """
         self._plane_type = PlaneType.LINE_ANGLE
+
+        # Lines use EntityType.EDGE
+        line_query = {
+            "btType": "BTMIndividualQuery-138",
+            "queryString": f'query=qCreatedBy(makeId("{line_ref}"), EntityType.EDGE);',
+        }
 
         self.parameters = [
             {
@@ -118,12 +152,7 @@ class PlaneBuilder:
             {
                 "btType": "BTMParameterQueryList-148",
                 "parameterId": "line",
-                "queries": [
-                    {
-                        "btType": "BTMIndividualQuery-138",
-                        "deterministicIds": [line_deterministic_id],
-                    }
-                ],
+                "queries": [line_query],
             },
             {
                 "btType": "BTMParameterQuantity-147",
@@ -137,21 +166,27 @@ class PlaneBuilder:
 
     def three_point(
         self,
-        point1_id: str,
-        point2_id: str,
-        point3_id: str,
+        point1_ref: str,
+        point2_ref: str,
+        point3_ref: str,
     ) -> "PlaneBuilder":
         """Create a plane through three points.
 
         Args:
-            point1_id: Deterministic ID of first point/vertex.
-            point2_id: Deterministic ID of second point/vertex.
-            point3_id: Deterministic ID of third point/vertex.
+            point1_ref: Reference to first point/vertex (feature ID).
+            point2_ref: Reference to second point/vertex (feature ID).
+            point3_ref: Reference to third point/vertex (feature ID).
 
         Returns:
             Self for chaining.
         """
         self._plane_type = PlaneType.THREE_POINT
+
+        def _make_vertex_query(ref: str) -> Dict[str, Any]:
+            return {
+                "btType": "BTMIndividualQuery-138",
+                "queryString": f'query=qCreatedBy(makeId("{ref}"), EntityType.VERTEX);',
+            }
 
         self.parameters = [
             {
@@ -163,32 +198,17 @@ class PlaneBuilder:
             {
                 "btType": "BTMParameterQueryList-148",
                 "parameterId": "point1",
-                "queries": [
-                    {
-                        "btType": "BTMIndividualQuery-138",
-                        "deterministicIds": [point1_id],
-                    }
-                ],
+                "queries": [_make_vertex_query(point1_ref)],
             },
             {
                 "btType": "BTMParameterQueryList-148",
                 "parameterId": "point2",
-                "queries": [
-                    {
-                        "btType": "BTMIndividualQuery-138",
-                        "deterministicIds": [point2_id],
-                    }
-                ],
+                "queries": [_make_vertex_query(point2_ref)],
             },
             {
                 "btType": "BTMParameterQueryList-148",
                 "parameterId": "point3",
-                "queries": [
-                    {
-                        "btType": "BTMIndividualQuery-138",
-                        "deterministicIds": [point3_id],
-                    }
-                ],
+                "queries": [_make_vertex_query(point3_ref)],
             },
         ]
 
@@ -196,14 +216,14 @@ class PlaneBuilder:
 
     def mid_plane(
         self,
-        plane1_id: str,
-        plane2_id: str,
+        plane1_ref: str,
+        plane2_ref: str,
     ) -> "PlaneBuilder":
         """Create a midplane between two planes or faces.
 
         Args:
-            plane1_id: Deterministic ID of first plane/face.
-            plane2_id: Deterministic ID of second plane/face.
+            plane1_ref: Reference to first plane/face (deterministic ID, name, or feature ID).
+            plane2_ref: Reference to second plane/face (deterministic ID, name, or feature ID).
 
         Returns:
             Self for chaining.
@@ -220,22 +240,12 @@ class PlaneBuilder:
             {
                 "btType": "BTMParameterQueryList-148",
                 "parameterId": "tool1",
-                "queries": [
-                    {
-                        "btType": "BTMIndividualQuery-138",
-                        "deterministicIds": [plane1_id],
-                    }
-                ],
+                "queries": [_make_plane_query(plane1_ref)],
             },
             {
                 "btType": "BTMParameterQueryList-148",
                 "parameterId": "tool2",
-                "queries": [
-                    {
-                        "btType": "BTMIndividualQuery-138",
-                        "deterministicIds": [plane2_id],
-                    }
-                ],
+                "queries": [_make_plane_query(plane2_ref)],
             },
         ]
 

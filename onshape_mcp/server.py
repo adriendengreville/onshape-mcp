@@ -2256,6 +2256,15 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             feature_data = builder.build()
             result = await partstudio_manager.add_feature(doc_id, ws_id, elem_id, feature_data)
             feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
+
+            # Check for feature regeneration errors
+            feature_state = result.get("featureState", {})
+            status = feature_state.get("featureStatus", "OK")
+            if status != "OK":
+                errors = feature_state.get("errors", [])
+                error_msgs = [e.get("message", str(e)) for e in errors] if errors else ["unknown regeneration error"]
+                return [TextContent(type="text", text=f"Construction plane created but FAILED regeneration (status={status}). Feature ID: {feature_id}. Errors: {'; '.join(error_msgs)}")]
+
             return [TextContent(type="text", text=f"Created construction plane ({plane_type_str}). Feature ID: {feature_id}")]
         except Exception as e:
             return [TextContent(type="text", text=f"Error creating construction plane: {str(e)}")]
@@ -2341,6 +2350,13 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     plane_data = plane_builder.build()
                     plane_result = await partstudio_manager.add_feature(doc_id, ws_id, elem_id, plane_data)
                     plane_id = plane_result.get("feature", {}).get("featureId", plane_result.get("featureId", ""))
+
+                    # Check plane regeneration
+                    plane_state = plane_result.get("featureState", {})
+                    if plane_state.get("featureStatus", "OK") != "OK":
+                        errors = plane_state.get("errors", [])
+                        error_msgs = [e.get("message", str(e)) for e in errors] if errors else ["unknown"]
+                        return [TextContent(type="text", text=f"Error: Construction plane for section {i+1} failed regeneration: {'; '.join(error_msgs)}")]
 
                 # Create sketch on that plane
                 sketch = SketchBuilder(name=f"Section {i+1}", plane_id=plane_id)
