@@ -902,7 +902,7 @@ async def list_tools() -> list[Tool]:
                                 },
                                 "start": {"type": "array", "items": {"type": "number"}, "description": "For line: [x,y]"},
                                 "end": {"type": "array", "items": {"type": "number"}, "description": "For line: [x,y]"},
-                                "points": {"type": "array", "description": "For polyline/spline: [[x,y], ...]"},
+                                "points": {"type": "array", "items": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}, "description": "For polyline/spline: [[x,y], ...]"},
                                 "closed": {"type": "boolean", "description": "For polyline: close the loop", "default": True},
                                 "center": {"type": "array", "items": {"type": "number"}, "description": "For circle/arc/polygon: [x,y]"},
                                 "radius": {"type": "number", "description": "For circle/arc/polygon: radius in inches"},
