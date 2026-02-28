@@ -627,11 +627,250 @@ class SketchBuilder:
             vy = cy + radius * math.sin(angle)
             vertices.append((vx, vy))
 
-        # Add line segments between consecutive vertices
-        for i in range(sides):
-            start = vertices[i]
-            end = vertices[(i + 1) % sides]
+        # Use add_polyline to create the closed polygon with proper constraints
+        self.add_polyline(vertices, closed=True, is_construction=is_construction)
+
+        return self
+
+    def add_polyline(
+        self,
+        points: List[Tuple[float, float]],
+        closed: bool = True,
+        is_construction: bool = False,
+    ) -> "SketchBuilder":
+        """Add a polyline (connected line segments) to the sketch.
+
+        Creates N line segments connecting consecutive points. If closed,
+        the last point connects back to the first, forming a closed profile
+        suitable for extrusion or lofting.
+
+        Args:
+            points: Ordered list of (x, y) coordinates in inches.
+                    Minimum 2 points for open, 3 for closed polyline.
+            closed: Whether to close the loop (last→first). Default True.
+            is_construction: Whether this is construction geometry.
+
+        Returns:
+            Self for chaining
+
+        Raises:
+            ValueError: If fewer than required points are provided.
+        """
+        min_pts = 3 if closed else 2
+        if len(points) < min_pts:
+            raise ValueError(
+                f"Polyline requires at least {min_pts} points ({'closed' if closed else 'open'}), "
+                f"got {len(points)}"
+            )
+
+        n = len(points)
+        segments = n if closed else n - 1
+
+        # Create all line segments first, collecting their IDs
+        line_ids: List[str] = []
+        for i in range(segments):
+            start = points[i]
+            end = points[(i + 1) % n]
             self.add_line(start, end, is_construction=is_construction)
+            # The line ID is the last entity added
+            line_ids.append(self.entities[-1]["entityId"])
+
+        # Add COINCIDENT constraints between consecutive segment endpoints
+        polyline_id = self._generate_entity_id("polyline")
+        for i in range(segments):
+            next_i = (i + 1) % segments
+            if not closed and next_i == 0:
+                break  # Don't wrap for open polylines
+            # Connect end of segment i to start of segment i+1
+            self.constraints.append(
+                {
+                    "btType": "BTMSketchConstraint-2",
+                    "constraintType": "COINCIDENT",
+                    "entityId": f"{polyline_id}.join.{i}",
+                    "parameters": [
+                        {
+                            "btType": "BTMParameterString-149",
+                            "value": f"{line_ids[i]}.end",
+                            "parameterId": "localFirst",
+                        },
+                        {
+                            "btType": "BTMParameterString-149",
+                            "value": f"{line_ids[next_i]}.start",
+                            "parameterId": "localSecond",
+                        },
+                    ],
+                }
+            )
+
+        return self
+
+    def add_spline(
+        self,
+        points: List[Tuple[float, float]],
+        is_periodic: bool = False,
+        start_derivative: Optional[Tuple[float, float]] = None,
+        end_derivative: Optional[Tuple[float, float]] = None,
+        is_construction: bool = False,
+    ) -> "SketchBuilder":
+        """Add an interpolated spline curve through fit points.
+
+        Uses BTCurveGeometryInterpolatedSpline-116 to create a smooth curve
+        that passes through each specified point.
+
+        Args:
+            points: Fit points [(x1,y1), (x2,y2), ...] in inches.
+                    Minimum 2 points required.
+            is_periodic: Whether the spline is closed/periodic.
+            start_derivative: Optional tangent direction (dx, dy) at start.
+            end_derivative: Optional tangent direction (dx, dy) at end.
+            is_construction: Whether this is construction geometry.
+
+        Returns:
+            Self for chaining
+
+        Raises:
+            ValueError: If fewer than 2 points provided.
+        """
+        if len(points) < 2:
+            raise ValueError("Spline requires at least 2 fit points")
+
+        def to_meters(inches: float) -> float:
+            return inches * 0.0254
+
+        # Flatten points to [x1, y1, x2, y2, ...] in meters
+        interpolation_points: List[float] = []
+        for px, py in points:
+            interpolation_points.append(to_meters(px))
+            interpolation_points.append(to_meters(py))
+
+        spline_id = self._generate_entity_id("spline")
+
+        geometry: Dict[str, Any] = {
+            "btType": "BTCurveGeometryInterpolatedSpline-116",
+            "isPeriodic": is_periodic,
+            "interpolationPoints": interpolation_points,
+        }
+
+        if start_derivative:
+            geometry["startDerivativeX"] = start_derivative[0]
+            geometry["startDerivativeY"] = start_derivative[1]
+        if end_derivative:
+            geometry["endDerivativeX"] = end_derivative[0]
+            geometry["endDerivativeY"] = end_derivative[1]
+
+        self.entities.append(
+            {
+                "btType": "BTMSketchCurveSegment-155",
+                "entityId": spline_id,
+                "startPointId": f"{spline_id}.start",
+                "endPointId": f"{spline_id}.end",
+                "startParam": 0.0,
+                "endParam": 1.0,
+                "geometry": geometry,
+                "isConstruction": is_construction,
+            }
+        )
+
+        return self
+
+    def add_bspline(
+        self,
+        control_points: List[Tuple[float, float]],
+        degree: int = 3,
+        is_periodic: bool = False,
+        is_rational: bool = False,
+        knots: Optional[List[float]] = None,
+        weights: Optional[List[float]] = None,
+        is_construction: bool = False,
+    ) -> "SketchBuilder":
+        """Add a B-spline (NURBS) curve defined by control points.
+
+        Uses BTCurveGeometrySpline-118 for precise curve control.
+
+        Args:
+            control_points: Control points [(x1,y1), ...] in inches.
+            degree: Spline degree (default 3 = cubic).
+            is_periodic: Whether the spline is closed/periodic.
+            is_rational: Whether weights are used (NURBS).
+            knots: Knot vector. Auto-generated (uniform clamped) if None.
+                   Must have (degree + control_point_count + 1) entries.
+            weights: Weight per control point (for rational B-splines).
+            is_construction: Whether this is construction geometry.
+
+        Returns:
+            Self for chaining
+
+        Raises:
+            ValueError: If parameters are inconsistent.
+        """
+        n = len(control_points)
+        if n < degree + 1:
+            raise ValueError(
+                f"B-spline of degree {degree} requires at least {degree + 1} "
+                f"control points, got {n}"
+            )
+
+        def to_meters(inches: float) -> float:
+            return inches * 0.0254
+
+        # Flatten control points to [x1, y1, x2, y2, ...] in meters
+        flat_cps: List[float] = []
+        for px, py in control_points:
+            flat_cps.append(to_meters(px))
+            flat_cps.append(to_meters(py))
+
+        # Auto-generate clamped uniform knot vector if not provided
+        if knots is None:
+            # Clamped knot vector: degree+1 zeros, interior knots, degree+1 ones
+            num_knots = n + degree + 1
+            knots = []
+            for i in range(num_knots):
+                if i <= degree:
+                    knots.append(0.0)
+                elif i >= num_knots - degree - 1:
+                    knots.append(1.0)
+                else:
+                    knots.append((i - degree) / (n - degree))
+        else:
+            expected = n + degree + 1
+            if len(knots) != expected:
+                raise ValueError(
+                    f"Knot vector must have {expected} entries "
+                    f"(degree={degree}, {n} control points), got {len(knots)}"
+                )
+
+        bspline_id = self._generate_entity_id("bspline")
+
+        geometry: Dict[str, Any] = {
+            "btType": "BTCurveGeometrySpline-118",
+            "degree": degree,
+            "isPeriodic": is_periodic,
+            "isRational": is_rational,
+            "controlPointCount": n,
+            "controlPoints": flat_cps,
+            "knots": knots,
+        }
+
+        if is_rational and weights:
+            if len(weights) != n:
+                raise ValueError(
+                    f"Weights count ({len(weights)}) must match "
+                    f"control point count ({n})"
+                )
+            geometry["weights"] = weights
+
+        self.entities.append(
+            {
+                "btType": "BTMSketchCurveSegment-155",
+                "entityId": bspline_id,
+                "startPointId": f"{bspline_id}.start",
+                "endPointId": f"{bspline_id}.end",
+                "startParam": 0.0,
+                "endParam": 1.0,
+                "geometry": geometry,
+                "isConstruction": is_construction,
+            }
+        )
 
         return self
 

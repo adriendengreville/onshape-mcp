@@ -32,6 +32,9 @@ from .builders.chamfer import ChamferBuilder, ChamferType
 from .builders.revolve import RevolveBuilder, RevolveType
 from .builders.pattern import LinearPatternBuilder, CircularPatternBuilder
 from .builders.boolean import BooleanBuilder, BooleanType
+from .builders.plane import PlaneBuilder, PlaneType, STANDARD_PLANE_IDS
+from .builders.loft import LoftBuilder, LoftType
+from .builders.sweep import SweepBuilder, SweepType
 from .analysis.interference import check_assembly_interference, format_interference_result
 from .analysis.positioning import get_assembly_positions, set_absolute_position, align_to_face
 
@@ -581,6 +584,356 @@ async def list_tools() -> list[Tool]:
             },
         ),
         # === Feature Tools ===
+        Tool(
+            name="create_sketch_polygon",
+            description="Create a regular polygon sketch (triangle, pentagon, hexagon, etc.) on a standard or custom plane",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Sketch name", "default": "Polygon Sketch"},
+                    "plane": {
+                        "type": "string",
+                        "description": "Sketch plane: 'Front', 'Top', 'Right', or a custom plane feature ID",
+                        "default": "Front",
+                    },
+                    "centerX": {"type": "number", "description": "Center X in inches", "default": 0},
+                    "centerY": {"type": "number", "description": "Center Y in inches", "default": 0},
+                    "sides": {"type": "integer", "description": "Number of sides (3=triangle, 6=hexagon, etc.)", "minimum": 3},
+                    "radius": {"type": "number", "description": "Circumscribed radius in inches"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "sides", "radius"],
+            },
+        ),
+        Tool(
+            name="create_sketch_polyline",
+            description="Create a polyline (connected line segments) from an ordered list of 2D points. Use closed=true for filled profiles suitable for extrusion/lofting. Ideal for creating arbitrary cross-sections for organic shapes.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Sketch name", "default": "Polyline Sketch"},
+                    "plane": {
+                        "type": "string",
+                        "description": "Sketch plane: 'Front', 'Top', 'Right', or a custom plane feature ID",
+                        "default": "Front",
+                    },
+                    "points": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 2,
+                            "maxItems": 2,
+                        },
+                        "description": "Ordered list of [x, y] points in inches",
+                        "minItems": 2,
+                    },
+                    "closed": {
+                        "type": "boolean",
+                        "description": "Whether to close the polyline (connect last point to first). Default true.",
+                        "default": True,
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "points"],
+            },
+        ),
+        Tool(
+            name="create_sketch_spline",
+            description="Create a smooth interpolated spline curve through fit points. The curve passes exactly through each point.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Sketch name", "default": "Spline Sketch"},
+                    "plane": {
+                        "type": "string",
+                        "description": "Sketch plane: 'Front', 'Top', 'Right', or a custom plane feature ID",
+                        "default": "Front",
+                    },
+                    "points": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 2,
+                            "maxItems": 2,
+                        },
+                        "description": "Fit points [[x1,y1], [x2,y2], ...] in inches",
+                        "minItems": 2,
+                    },
+                    "isPeriodic": {
+                        "type": "boolean",
+                        "description": "Whether the spline is closed/periodic",
+                        "default": False,
+                    },
+                    "startDerivative": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "description": "Optional tangent direction [dx, dy] at start",
+                    },
+                    "endDerivative": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "description": "Optional tangent direction [dx, dy] at end",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "points"],
+            },
+        ),
+        Tool(
+            name="create_sketch_bspline",
+            description="Create a B-spline (NURBS) curve defined by control points. The curve is attracted to but does not necessarily pass through control points.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Sketch name", "default": "B-Spline Sketch"},
+                    "plane": {
+                        "type": "string",
+                        "description": "Sketch plane: 'Front', 'Top', 'Right', or a custom plane feature ID",
+                        "default": "Front",
+                    },
+                    "controlPoints": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 2,
+                            "maxItems": 2,
+                        },
+                        "description": "Control points [[x1,y1], [x2,y2], ...] in inches",
+                        "minItems": 2,
+                    },
+                    "degree": {"type": "integer", "description": "Spline degree (default 3 = cubic)", "default": 3},
+                    "isPeriodic": {"type": "boolean", "description": "Whether the spline is closed", "default": False},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "controlPoints"],
+            },
+        ),
+        Tool(
+            name="create_construction_plane",
+            description="Create a construction plane at an offset, angle, or through points. Construction planes enable sketching at arbitrary positions and angles — critical for lofts and organic shapes.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Plane name", "default": "Plane"},
+                    "planeType": {
+                        "type": "string",
+                        "enum": ["offset", "line_angle", "three_point", "mid_plane"],
+                        "description": "How to create the plane",
+                    },
+                    "basePlane": {
+                        "type": "string",
+                        "description": "For offset: base plane name ('Front', 'Top', 'Right') or plane feature ID",
+                    },
+                    "offsetDistance": {
+                        "type": "number",
+                        "description": "For offset: distance in inches",
+                    },
+                    "flip": {
+                        "type": "boolean",
+                        "description": "For offset: flip direction",
+                        "default": False,
+                    },
+                    "lineId": {
+                        "type": "string",
+                        "description": "For line_angle: deterministic ID of the line/edge",
+                    },
+                    "angle": {
+                        "type": "number",
+                        "description": "For line_angle: angle in degrees",
+                    },
+                    "point1Id": {"type": "string", "description": "For three_point: first point ID"},
+                    "point2Id": {"type": "string", "description": "For three_point: second point ID"},
+                    "point3Id": {"type": "string", "description": "For three_point: third point ID"},
+                    "plane1Id": {"type": "string", "description": "For mid_plane: first plane/face ID"},
+                    "plane2Id": {"type": "string", "description": "For mid_plane: second plane/face ID"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "planeType"],
+            },
+        ),
+        Tool(
+            name="create_loft",
+            description="Create a loft between 2+ sketch profiles on different planes. Profiles are connected in order to form a smooth solid. Essential for organic/tapered shapes.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Loft name", "default": "Loft"},
+                    "profileSketchIds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Ordered list of sketch feature IDs to loft between (min 2)",
+                        "minItems": 2,
+                    },
+                    "guideSketchIds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional guide curve sketch IDs to control loft shape",
+                    },
+                    "operationType": {
+                        "type": "string",
+                        "enum": ["NEW", "ADD", "REMOVE", "INTERSECT"],
+                        "description": "Loft operation type",
+                        "default": "NEW",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "profileSketchIds"],
+            },
+        ),
+        Tool(
+            name="create_sweep",
+            description="Create a sweep by extruding a profile sketch along a path sketch. Ideal for tubes, tails, curved handles, and path-following geometry.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Sweep name", "default": "Sweep"},
+                    "profileSketchId": {"type": "string", "description": "Feature ID of the profile (cross-section) sketch"},
+                    "pathSketchId": {"type": "string", "description": "Feature ID of the path sketch (connected edges)"},
+                    "operationType": {
+                        "type": "string",
+                        "enum": ["NEW", "ADD", "REMOVE", "INTERSECT"],
+                        "description": "Sweep operation type",
+                        "default": "NEW",
+                    },
+                    "keepProfileOrientation": {
+                        "type": "boolean",
+                        "description": "Keep profile orientation constant along path",
+                        "default": False,
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "profileSketchId", "pathSketchId"],
+            },
+        ),
+        Tool(
+            name="create_lofted_shape",
+            description="ALL-IN-ONE: Create a solid by lofting through cross-section profiles at specified offsets along an axis. Each profile is defined as a closed polyline. This single tool creates construction planes, sketches, and a loft in one call — ideal for organic shapes like animal bodies, tapered forms, and sculpted geometry.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Shape name", "default": "Lofted Shape"},
+                    "axis": {
+                        "type": "string",
+                        "enum": ["X", "Y", "Z"],
+                        "description": "Axis along which sections are offset. Y=vertical, X=left-right, Z=front-back.",
+                        "default": "Y",
+                    },
+                    "sections": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "offset": {"type": "number", "description": "Distance along axis in inches"},
+                                "points": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "array",
+                                        "items": {"type": "number"},
+                                        "minItems": 2,
+                                        "maxItems": 2,
+                                    },
+                                    "description": "2D profile vertices [[x,y], ...] in the cross-section plane (inches). Will be closed automatically.",
+                                    "minItems": 3,
+                                },
+                            },
+                            "required": ["offset", "points"],
+                        },
+                        "description": "Cross-section definitions, each with an offset and a closed polyline profile. Minimum 2 sections.",
+                        "minItems": 2,
+                    },
+                    "operationType": {
+                        "type": "string",
+                        "enum": ["NEW", "ADD", "REMOVE", "INTERSECT"],
+                        "description": "Operation type for the resulting solid",
+                        "default": "NEW",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "sections"],
+            },
+        ),
+        Tool(
+            name="create_sketch_multi",
+            description="Create a sketch with multiple entities (lines, polylines, arcs, splines, circles, polygons) in a single call. More efficient than creating separate sketches.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Sketch name", "default": "Multi Sketch"},
+                    "plane": {
+                        "type": "string",
+                        "description": "Sketch plane: 'Front', 'Top', 'Right', or a custom plane feature ID",
+                        "default": "Front",
+                    },
+                    "entities": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "enum": ["line", "polyline", "circle", "arc", "polygon", "spline", "rectangle"],
+                                    "description": "Entity type",
+                                },
+                                "start": {"type": "array", "items": {"type": "number"}, "description": "For line: [x,y]"},
+                                "end": {"type": "array", "items": {"type": "number"}, "description": "For line: [x,y]"},
+                                "points": {"type": "array", "description": "For polyline/spline: [[x,y], ...]"},
+                                "closed": {"type": "boolean", "description": "For polyline: close the loop", "default": True},
+                                "center": {"type": "array", "items": {"type": "number"}, "description": "For circle/arc/polygon: [x,y]"},
+                                "radius": {"type": "number", "description": "For circle/arc/polygon: radius in inches"},
+                                "sides": {"type": "integer", "description": "For polygon: number of sides"},
+                                "startAngle": {"type": "number", "description": "For arc: start angle in degrees"},
+                                "endAngle": {"type": "number", "description": "For arc: end angle in degrees"},
+                                "corner1": {"type": "array", "items": {"type": "number"}, "description": "For rectangle: [x,y]"},
+                                "corner2": {"type": "array", "items": {"type": "number"}, "description": "For rectangle: [x,y]"},
+                            },
+                            "required": ["type"],
+                        },
+                        "description": "Array of sketch entities to create",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "entities"],
+            },
+        ),
+        Tool(
+            name="get_face_ids",
+            description="Get deterministic IDs of faces created by a specific feature. Use these IDs for sketch-on-face, boolean references, or construction plane targets.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "featureId": {"type": "string", "description": "Feature ID whose faces to query"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "featureId"],
+            },
+        ),
         Tool(
             name="create_fillet",
             description="Create a fillet (rounded edge) on one or more edges",
@@ -1770,6 +2123,297 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return [TextContent(type="text", text=f"Created sketch with arc on {plane_name} plane. Feature ID: {feature_id}")]
         except Exception as e:
             return [TextContent(type="text", text=f"Error creating sketch arc: {str(e)}")]
+
+    elif name == "create_sketch_polygon":
+        try:
+            plane_name = arguments.get("plane", "Front")
+            plane = SketchPlane[plane_name.upper()]
+            plane_id = await partstudio_manager.get_plane_id(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], plane_name,
+            )
+            sketch = SketchBuilder(name=arguments.get("name", "Polygon Sketch"), plane=plane, plane_id=plane_id)
+            sketch.add_polygon(
+                center=(arguments.get("centerX", 0), arguments.get("centerY", 0)),
+                sides=arguments["sides"],
+                radius=arguments["radius"],
+            )
+            feature_data = sketch.build()
+            result = await partstudio_manager.add_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            )
+            feature_id = result.get("feature", {}).get("featureId", "unknown")
+            return [TextContent(type="text", text=f"Created {arguments['sides']}-sided polygon sketch. Feature ID: {feature_id}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating polygon sketch: {str(e)}")]
+
+    elif name == "create_sketch_polyline":
+        try:
+            plane_name = arguments.get("plane", "Front")
+            # Support custom plane IDs (from create_construction_plane)
+            if plane_name.upper() in ("FRONT", "TOP", "RIGHT"):
+                plane = SketchPlane[plane_name.upper()]
+                plane_id = await partstudio_manager.get_plane_id(
+                    arguments["documentId"], arguments["workspaceId"], arguments["elementId"], plane_name,
+                )
+            else:
+                plane = SketchPlane.FRONT  # Doesn't matter for custom planes
+                plane_id = plane_name  # Use the feature ID directly
+            sketch = SketchBuilder(name=arguments.get("name", "Polyline Sketch"), plane=plane, plane_id=plane_id)
+            points = [tuple(p) for p in arguments["points"]]
+            closed = arguments.get("closed", True)
+            sketch.add_polyline(points=points, closed=closed)
+            feature_data = sketch.build()
+            result = await partstudio_manager.add_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            )
+            feature_id = result.get("feature", {}).get("featureId", "unknown")
+            return [TextContent(type="text", text=f"Created polyline sketch ({len(points)} points, {'closed' if closed else 'open'}). Feature ID: {feature_id}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating polyline sketch: {str(e)}")]
+
+    elif name == "create_sketch_spline":
+        try:
+            plane_name = arguments.get("plane", "Front")
+            if plane_name.upper() in ("FRONT", "TOP", "RIGHT"):
+                plane = SketchPlane[plane_name.upper()]
+                plane_id = await partstudio_manager.get_plane_id(
+                    arguments["documentId"], arguments["workspaceId"], arguments["elementId"], plane_name,
+                )
+            else:
+                plane = SketchPlane.FRONT
+                plane_id = plane_name
+            sketch = SketchBuilder(name=arguments.get("name", "Spline Sketch"), plane=plane, plane_id=plane_id)
+            points = [tuple(p) for p in arguments["points"]]
+            periodic = arguments.get("isPeriodic", False)
+            start_deriv = tuple(arguments["startDerivative"]) if arguments.get("startDerivative") else None
+            end_deriv = tuple(arguments["endDerivative"]) if arguments.get("endDerivative") else None
+            sketch.add_spline(points=points, is_periodic=periodic, start_derivative=start_deriv, end_derivative=end_deriv)
+            feature_data = sketch.build()
+            result = await partstudio_manager.add_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            )
+            feature_id = result.get("feature", {}).get("featureId", "unknown")
+            return [TextContent(type="text", text=f"Created spline sketch ({len(points)} fit points). Feature ID: {feature_id}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating spline sketch: {str(e)}")]
+
+    elif name == "create_sketch_bspline":
+        try:
+            plane_name = arguments.get("plane", "Front")
+            if plane_name.upper() in ("FRONT", "TOP", "RIGHT"):
+                plane = SketchPlane[plane_name.upper()]
+                plane_id = await partstudio_manager.get_plane_id(
+                    arguments["documentId"], arguments["workspaceId"], arguments["elementId"], plane_name,
+                )
+            else:
+                plane = SketchPlane.FRONT
+                plane_id = plane_name
+            sketch = SketchBuilder(name=arguments.get("name", "B-Spline Sketch"), plane=plane, plane_id=plane_id)
+            control_points = [tuple(p) for p in arguments["controlPoints"]]
+            degree = arguments.get("degree", 3)
+            periodic = arguments.get("isPeriodic", False)
+            sketch.add_bspline(control_points=control_points, degree=degree, is_periodic=periodic)
+            feature_data = sketch.build()
+            result = await partstudio_manager.add_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            )
+            feature_id = result.get("feature", {}).get("featureId", "unknown")
+            return [TextContent(type="text", text=f"Created B-spline sketch ({len(control_points)} control points, degree {degree}). Feature ID: {feature_id}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating B-spline sketch: {str(e)}")]
+
+    elif name == "create_construction_plane":
+        try:
+            plane_type_str = arguments["planeType"]
+            doc_id = arguments["documentId"]
+            ws_id = arguments["workspaceId"]
+            elem_id = arguments["elementId"]
+
+            builder = PlaneBuilder(name=arguments.get("name", "Plane"))
+
+            if plane_type_str == "offset":
+                base = arguments.get("basePlane", "Top")
+                if base.upper() in ("FRONT", "TOP", "RIGHT"):
+                    base_plane_id = await partstudio_manager.get_plane_id(doc_id, ws_id, elem_id, base)
+                else:
+                    base_plane_id = base
+                distance = arguments.get("offsetDistance", 1.0)
+                flip = arguments.get("flip", False)
+                builder.offset_from_plane(base_plane_id, distance, flip=flip)
+
+            elif plane_type_str == "line_angle":
+                builder.line_angle(arguments["lineId"], arguments.get("angle", 0))
+
+            elif plane_type_str == "three_point":
+                builder.three_point(arguments["point1Id"], arguments["point2Id"], arguments["point3Id"])
+
+            elif plane_type_str == "mid_plane":
+                builder.mid_plane(arguments["plane1Id"], arguments["plane2Id"])
+
+            else:
+                return [TextContent(type="text", text=f"Unknown plane type: {plane_type_str}")]
+
+            feature_data = builder.build()
+            result = await partstudio_manager.add_feature(doc_id, ws_id, elem_id, feature_data)
+            feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
+            return [TextContent(type="text", text=f"Created construction plane ({plane_type_str}). Feature ID: {feature_id}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating construction plane: {str(e)}")]
+
+    elif name == "create_loft":
+        try:
+            doc_id = arguments["documentId"]
+            ws_id = arguments["workspaceId"]
+            elem_id = arguments["elementId"]
+            op_type = LoftType[arguments.get("operationType", "NEW")]
+            builder = LoftBuilder(name=arguments.get("name", "Loft"), operation_type=op_type)
+
+            for sketch_id in arguments["profileSketchIds"]:
+                builder.add_profile(sketch_id)
+
+            for guide_id in arguments.get("guideSketchIds", []):
+                builder.add_guide(guide_id)
+
+            feature_data = builder.build()
+            result = await partstudio_manager.add_feature(doc_id, ws_id, elem_id, feature_data)
+            feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
+            n_profiles = len(arguments["profileSketchIds"])
+            return [TextContent(type="text", text=f"Created loft through {n_profiles} profiles. Feature ID: {feature_id}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating loft: {str(e)}")]
+
+    elif name == "create_sweep":
+        try:
+            doc_id = arguments["documentId"]
+            ws_id = arguments["workspaceId"]
+            elem_id = arguments["elementId"]
+            op_type = SweepType[arguments.get("operationType", "NEW")]
+            builder = SweepBuilder(
+                name=arguments.get("name", "Sweep"),
+                operation_type=op_type,
+            )
+            builder.set_profile(arguments["profileSketchId"])
+            builder.set_path(arguments["pathSketchId"])
+            if arguments.get("keepProfileOrientation"):
+                builder.keep_profile_orientation = True
+
+            feature_data = builder.build()
+            result = await partstudio_manager.add_feature(doc_id, ws_id, elem_id, feature_data)
+            feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
+            return [TextContent(type="text", text=f"Created sweep. Feature ID: {feature_id}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating sweep: {str(e)}")]
+
+    elif name == "create_lofted_shape":
+        try:
+            doc_id = arguments["documentId"]
+            ws_id = arguments["workspaceId"]
+            elem_id = arguments["elementId"]
+            sections = arguments["sections"]
+            axis = arguments.get("axis", "Y")
+            op_type_str = arguments.get("operationType", "NEW")
+
+            # Map axis to base plane for offset
+            axis_to_plane = {"X": "Right", "Y": "Top", "Z": "Front"}
+            base_plane_name = axis_to_plane.get(axis.upper(), "Top")
+
+            # Sort sections by offset
+            sections_sorted = sorted(sections, key=lambda s: s["offset"])
+
+            sketch_feature_ids = []
+            for i, section in enumerate(sections_sorted):
+                offset = section["offset"]
+                points = section["points"]
+
+                # Create construction plane at offset (skip if offset == 0 and use base plane)
+                if abs(offset) < 1e-9:
+                    plane_id = await partstudio_manager.get_plane_id(doc_id, ws_id, elem_id, base_plane_name)
+                else:
+                    base_plane_id = await partstudio_manager.get_plane_id(doc_id, ws_id, elem_id, base_plane_name)
+                    plane_builder = PlaneBuilder(name=f"Section Plane {i+1}")
+                    plane_builder.offset_from_plane(base_plane_id, offset)
+                    plane_data = plane_builder.build()
+                    plane_result = await partstudio_manager.add_feature(doc_id, ws_id, elem_id, plane_data)
+                    plane_id = plane_result.get("feature", {}).get("featureId", plane_result.get("featureId", ""))
+
+                # Create sketch on that plane
+                sketch = SketchBuilder(name=f"Section {i+1}", plane_id=plane_id)
+                sketch.add_polyline(points=[tuple(p) for p in points], closed=True)
+                sketch_data = sketch.build()
+                sketch_result = await partstudio_manager.add_feature(doc_id, ws_id, elem_id, sketch_data)
+                sketch_fid = sketch_result.get("feature", {}).get("featureId", "unknown")
+                sketch_feature_ids.append(sketch_fid)
+
+            # Create loft
+            loft_op = LoftType[op_type_str]
+            loft_builder = LoftBuilder(name=arguments.get("name", "Lofted Shape"), operation_type=loft_op)
+            for sid in sketch_feature_ids:
+                loft_builder.add_profile(sid)
+            loft_data = loft_builder.build()
+            loft_result = await partstudio_manager.add_feature(doc_id, ws_id, elem_id, loft_data)
+            loft_fid = loft_result.get("feature", {}).get("featureId", loft_result.get("featureId", "unknown"))
+
+            return [TextContent(type="text", text=(
+                f"Created lofted shape with {len(sections_sorted)} cross-sections along {axis} axis.\n"
+                f"Section sketch IDs: {sketch_feature_ids}\n"
+                f"Loft feature ID: {loft_fid}"
+            ))]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating lofted shape: {str(e)}")]
+
+    elif name == "create_sketch_multi":
+        try:
+            plane_name = arguments.get("plane", "Front")
+            if plane_name.upper() in ("FRONT", "TOP", "RIGHT"):
+                plane = SketchPlane[plane_name.upper()]
+                plane_id = await partstudio_manager.get_plane_id(
+                    arguments["documentId"], arguments["workspaceId"], arguments["elementId"], plane_name,
+                )
+            else:
+                plane = SketchPlane.FRONT
+                plane_id = plane_name
+            sketch = SketchBuilder(name=arguments.get("name", "Multi Sketch"), plane=plane, plane_id=plane_id)
+
+            for ent in arguments.get("entities", []):
+                etype = ent["type"]
+                if etype == "line":
+                    sketch.add_line(start=tuple(ent["start"]), end=tuple(ent["end"]))
+                elif etype == "polyline":
+                    pts = [tuple(p) for p in ent["points"]]
+                    sketch.add_polyline(points=pts, closed=ent.get("closed", True))
+                elif etype == "circle":
+                    sketch.add_circle(center=tuple(ent["center"]), radius=ent["radius"])
+                elif etype == "arc":
+                    sketch.add_arc(center=tuple(ent["center"]), radius=ent["radius"],
+                                   start_angle=ent.get("startAngle", 0), end_angle=ent.get("endAngle", 180))
+                elif etype == "polygon":
+                    sketch.add_polygon(center=tuple(ent["center"]), sides=ent["sides"], radius=ent["radius"])
+                elif etype == "spline":
+                    pts = [tuple(p) for p in ent["points"]]
+                    sketch.add_spline(points=pts, is_periodic=ent.get("isPeriodic", False))
+                elif etype == "rectangle":
+                    sketch.add_rectangle(corner1=tuple(ent["corner1"]), corner2=tuple(ent["corner2"]))
+
+            feature_data = sketch.build()
+            result = await partstudio_manager.add_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            )
+            feature_id = result.get("feature", {}).get("featureId", "unknown")
+            n_ents = len(arguments.get("entities", []))
+            return [TextContent(type="text", text=f"Created multi-entity sketch ({n_ents} entities). Feature ID: {feature_id}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating multi sketch: {str(e)}")]
+
+    elif name == "get_face_ids":
+        try:
+            result = await partstudio_manager.get_face_id(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                arguments["featureId"],
+            )
+            import json
+            return [TextContent(type="text", text=f"Face IDs for feature {arguments['featureId']}:\n{json.dumps(result, indent=2)}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error getting face IDs: {str(e)}")]
 
     elif name == "create_fillet":
         try:

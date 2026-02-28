@@ -183,3 +183,77 @@ class PartStudioManager:
         plane_id = standard_plane_ids[plane_name]
         self._plane_id_cache[cache_key] = plane_id
         return plane_id
+
+    async def get_body_details(
+        self,
+        document_id: str,
+        workspace_id: str,
+        element_id: str,
+    ) -> Dict[str, Any]:
+        """Get detailed body topology including face and edge IDs.
+
+        This is useful for discovering deterministic IDs of faces/edges
+        created by features, which can then be used as sketch planes
+        or references for other operations.
+
+        Args:
+            document_id: Document ID
+            workspace_id: Workspace ID
+            element_id: Part Studio element ID
+
+        Returns:
+            Body details data with faces and edges
+        """
+        path = (
+            f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}"
+            f"/e/{element_id}/bodydetails"
+        )
+        return await self.client.get(path)
+
+    async def get_face_ids(
+        self,
+        document_id: str,
+        workspace_id: str,
+        element_id: str,
+        feature_id: str,
+    ) -> List[str]:
+        """Get deterministic IDs of faces created by a specific feature.
+
+        Uses FeatureScript to query faces produced by the given feature.
+        These IDs can be used as sketch planes or boolean references.
+
+        Args:
+            document_id: Document ID
+            workspace_id: Workspace ID
+            element_id: Part Studio element ID
+            feature_id: The feature ID whose faces to query
+
+        Returns:
+            List of deterministic face IDs
+        """
+        script = f"""
+function(context is Context, queries is map) {{
+    var faces = evaluateQuery(context,
+        qCreatedBy(makeId("{feature_id}"), EntityType.FACE));
+    return faces;
+}}
+"""
+        path = (
+            f"/api/v8/partstudios/d/{document_id}/w/{workspace_id}"
+            f"/e/{element_id}/featurescript"
+        )
+        data = {"script": script}
+        result = await self.client.post(path, params={"rollbackBarIndex": -1}, data=data)
+
+        # Extract deterministic IDs from the FeatureScript result
+        face_ids: List[str] = []
+        if "result" in result and "value" in result["result"]:
+            for item in result["result"]["value"]:
+                if "value" in item and isinstance(item["value"], list):
+                    for query_item in item["value"]:
+                        det_ids = query_item.get("deterministicIds", [])
+                        face_ids.extend(det_ids)
+                elif "deterministicIds" in item:
+                    face_ids.extend(item["deterministicIds"])
+
+        return face_ids
