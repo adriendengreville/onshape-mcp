@@ -267,7 +267,6 @@ class PlaneBuilder:
             )
 
         return {
-            "btType": "BTFeatureDefinitionCall-1406",
             "feature": {
                 "btType": "BTMFeature-134",
                 "featureType": "cPlane",
