@@ -2279,6 +2279,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
             n_profiles = len(arguments["profileSketchIds"])
             return [TextContent(type="text", text=f"Created loft through {n_profiles} profiles. Feature ID: {feature_id}")]
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if hasattr(e.response, 'text') else ''
+            return [TextContent(type="text", text=f"Error creating loft: API {e.response.status_code}. {body}")]
         except Exception as e:
             return [TextContent(type="text", text=f"Error creating loft: {str(e)}")]
 
@@ -2301,6 +2304,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = await partstudio_manager.add_feature(doc_id, ws_id, elem_id, feature_data)
             feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
             return [TextContent(type="text", text=f"Created sweep. Feature ID: {feature_id}")]
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if hasattr(e.response, 'text') else ''
+            return [TextContent(type="text", text=f"Error creating sweep: API {e.response.status_code}. {body}")]
         except Exception as e:
             return [TextContent(type="text", text=f"Error creating sweep: {str(e)}")]
 
@@ -2358,8 +2364,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 f"Section sketch IDs: {sketch_feature_ids}\n"
                 f"Loft feature ID: {loft_fid}"
             ))]
+        except httpx.HTTPStatusError as e:
+            body = e.response.text[:500] if hasattr(e.response, 'text') else ''
+            return [TextContent(type="text", text=f"Error creating lofted shape: API {e.response.status_code}. {body}")]
         except Exception as e:
-            return [TextContent(type="text", text=f"Error creating lofted shape: {str(e)}")]
+            return [TextContent(type="text", text=f"Error creating lofted shape: {type(e).__name__}: {str(e)}")]
 
     elif name == "create_sketch_multi":
         try:

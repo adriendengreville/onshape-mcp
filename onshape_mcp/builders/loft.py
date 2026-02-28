@@ -118,7 +118,10 @@ class LoftBuilder:
                                 {
                                     "btType": "BTMIndividualSketchRegionQuery-140",
                                     "featureId": fid,
-                                    "filterInnerLoops": False,
+                                    "filterInnerLoops": True,
+                                    "queryStatement": None,
+                                    "queryString": f'query = qSketchRegion(id + "{fid}", true);',
+                                    "deterministicIds": [],
                                 }
                             ],
                         }
